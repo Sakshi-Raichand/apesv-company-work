@@ -1,6 +1,6 @@
 /* Apesv CEO Brief: keeps the page on the phone so it opens instantly, even offline.
    The numbers themselves are saved by the page; this file only saves the page and its fonts. */
-const CACHE = 'apesv-brief-v4';
+const CACHE = 'apesv-brief-v6';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './icon-512-maskable.png'];
 
 self.addEventListener('install', (e) => {

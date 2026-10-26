@@ -248,6 +248,9 @@ th { font-weight: 600; color: var(--ink-2); font-size: 12px; }
 .qa details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 .qa details ol { margin: 6px 0 0; padding-left: 18px; }
 .qa .asof-line { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.qa.pending .a-note { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .qa.pending .a-note { animation: none; } }
 
 /* ---------- Method ---------- */
 .card.method { max-width: 900px; padding: 0; }
@@ -491,6 +494,11 @@ var Analyst = (function () {
     if (/ trust | health | data quality | checks | is the data | up to date | stale | fresh | how old /.test(q) && !plan.metric) plan.op = 'health';
     if (/latest update|any update|summary|summarise|summarize|how are we doing|how did we do|what happened|what changed|overview|headlines|anything i should know|morning brief|give me the brief|what's new|whats new|status report|update me/.test(q) && !plan.metric) plan.op = 'summary';
     if (/^\s*(hi|hello|hey|help|what can (you|i) (do|ask))([^a-z]|$)/.test(q) || / help /.test(q) && !plan.metric) plan.op = plan.op === 'value' ? 'help' : plan.op;
+    if (!plan.metric && / (what can (you|u|i) (do|ask|answer|tell)|can (you|u) (answer|help|tell)|what do (you|u) know|anything|what (questions|things) can) /.test(q)) plan.op = 'help';
+    var improveQ = /improve|better|fix |reduce|boost|how (can|do|should) we|what should we change|any way/.test(q);
+    var cxWords = /feedback|customer experience|customer satisfaction|satisf|complain|happy|customer service quality|experience/.test(q);
+    if (cxWords || (improveQ && ['customers', 'support', 'reviews', 'returns'].indexOf(plan.metric) >= 0)) plan.op = 'experience';
+    else if (improveQ && ['revenue', 'orders', 'aov', 'cancel', 'margin', 'marketing', 'profit', 'delivery'].indexOf(plan.metric) >= 0 && plan.op === 'value') plan.op = 'decide';
     if (/ top | best | biggest | highest | most | largest | leading | strongest /.test(q)) plan.op = plan.op === 'value' ? 'top' : plan.op;
     if (/ worst | lowest | least | smallest | weakest | bottom | slowest | poorest /.test(q)) plan.op = plan.op === 'value' ? 'bottom' : plan.op;
     if (/ by | per | breakdown | split | mix | each | which | rank | ranking | compare countries | share /.test(q) && plan.op === 'value') plan.op = 'breakdown';
@@ -603,11 +611,12 @@ var Analyst = (function () {
 
   function answerInner(plan, B) {
     var D = B.dataDay, a, L, v, base;
-    if (plan.op === 'help') return help(B);
+    if (plan.op === 'help') return help(B, plan);
     if (plan.op === 'health') return health(B);
     if (plan.op === 'model') return model(plan, B);
     if (plan.op === 'recon') return recon(plan, B);
     if (plan.op === 'decide') return decide(plan, B);
+    if (plan.op === 'experience') return experience(plan, B);
     if (plan.op === 'summary' && plan.period && plan.period.kind === 'month' && plan.period.month !== B.dataDay.slice(0, 7)) return monthSummary(plan.period.month, B);
     if (plan.op === 'summary') return summary(B);
     if (!plan.metric) return askBack(B, plan);
@@ -813,7 +822,12 @@ var Analyst = (function () {
     if (m === 'delivery') {
       x = B.delivery; if (!x) return missing('Shipments_Logistics', B);
       var cars = x.byCarrier30.filter(function (c) { return c.deliveries >= 20; });
-      if (plan.dimType === 'carrier' && plan.dimValue) { var c = x.byCarrier30.filter(function (k) { return k.carrier === plan.dimValue; })[0]; if (c) return out(c.carrier + ' delivered ' + int(c.deliveries) + ' parcels in the last 30 days and ' + pct(c.latePct) + ' were late (company average ' + pct(x.latePct30) + ').', { working: ['Late = delivered after the promised date (Delay_Days above 0), by actual delivery date in the last 30 days.'], asOf: asOf(B) }); }
+      if (plan.dimType === 'carrier' && plan.dimValue) {
+        var c = x.byCarrier30.filter(function (k) { return k.carrier === plan.dimValue; })[0];
+        var w7 = x.worstCarrier7, wantWeek = p && p.kind === 'range' && p.days <= 7;
+        if (c && wantWeek && w7 && w7.carrier === c.carrier) return out(c.carrier + ' delivered ' + int(w7.deliveries) + ' parcels in the last 7 days and ' + pct(w7.latePct) + ' were late, against ' + pct(x.latePct7) + ' across all carriers. Over 30 days its late rate is ' + pct(c.latePct) + '.', { working: ['Late = delivered after the promised date (Delay_Days above 0), by actual delivery date.', 'The 7-day figure is kept for the carrier flagged this week; every carrier has a 30-day figure.'], asOf: asOf(B) });
+        if (c) return out(c.carrier + ' delivered ' + int(c.deliveries) + ' parcels in the last 30 days and ' + pct(c.latePct) + ' were late (company average ' + pct(x.latePct30) + ').' + (wantWeek ? ' I keep carrier-level figures for 30 days; ' + c.carrier + ' was not flagged this week.' : ''), { working: ['Late = delivered after the promised date (Delay_Days above 0), by actual delivery date in the last 30 days.'], asOf: asOf(B) });
+      }
       var worst = cars[0], best = cars[cars.length - 1];
       var wantBest = /reliable|best|on time|on-time|fastest|good/.test(plan.raw.toLowerCase()) && !/late|delay|worst|slow/.test(plan.raw.toLowerCase());
       return out((wantBest ? 'The most reliable carrier is ' + best.carrier + ' (' + pct(best.latePct) + ' late). ' : 'The carrier with the most late parcels is ' + worst.carrier + ' (' + pct(worst.latePct) + ' late). ') + 'Overall, ' + pct(x.onTimePct30) + ' of ' + int(x.delivered30) + ' parcels arrived on time in the last 30 days; late ones were ' + x.avgDelayWhenLate30 + ' days late on average. ' + int(x.inTransit) + ' parcels are in transit, ' + x.overdueInTransit + ' already past their promised date.' + note, {
@@ -973,8 +987,54 @@ var Analyst = (function () {
     return out((list.length === 1 ? 'One thing' : list.length + ' things') + ' from ' + dayName(B.dataDay) + ' may need a decision.', extra);
   }
 
-  function help(B) {
-    return out('Ask me about sales, orders, customers, marketing, delivery, returns, stock, support, profit or people. I understand days, weeks, months, "this month", "last 12 months", countries, product categories and sales channels. I can also show the SQL behind a number, the data model, whether revenue matches the Finance tab, and what decision each alert is for.', { chips: defaultChips(B), asOf: asOf(B) });
+  // ---------- customer feedback: where the numbers point ----------
+  function experience(plan, B) {
+    var rv = B.reviews, sp = B.support, rt = B.returns, dl = B.delivery;
+    if (!rv && !sp && !rt) return missing('Reviews, Customer_Service and Returns', B);
+    var head = [];
+    if (rv && rv.avgRating90 !== null) head.push('products are rated ' + rv.avgRating90.toFixed(2) + ' out of 5 (' + pct(rv.negativePct90, 0) + ' of reviews negative)');
+    if (sp && sp.csat30 !== null) head.push('support is rated ' + sp.csat30.toFixed(2) + ' out of 5');
+    if (rt && rt.refundPctOfRevenue90 !== null) head.push(pct(rt.refundPctOfRevenue90) + ' of revenue goes back as refunds');
+    var text = 'Customer feedback, in short: ' + head.join(', ') + '. The numbers point to these places to improve:';
+    var tips = [];
+    var issueFix = function (name) {
+      var n = name.toLowerCase();
+      if (/deliver|late|shipping/.test(n)) return 'which carriers to press or replace';
+      if (/refund/.test(n)) return 'whether customers should get automatic refund updates, so they stop having to ask';
+      if (/product|query|question/.test(n)) return 'whether product pages answer the questions customers keep asking';
+      if (/payment|charge|billing/.test(n)) return 'whether checkout and payments need a fix';
+      if (/damage/.test(n)) return 'whether packaging needs to change';
+      return 'which team owns the fix';
+    };
+    var reasonFix = function (name) {
+      var n = name.toLowerCase();
+      if (/size|fit/.test(n)) return 'whether size guides and product measurements need fixing';
+      if (/described|description/.test(n)) return 'whether product photos and descriptions match what arrives';
+      if (/defect|quality|broken/.test(n)) return 'which suppliers have a quality problem';
+      if (/damage/.test(n)) return 'whether packaging needs to change';
+      if (/late/.test(n)) return 'which carriers to press or replace';
+      if (/changed mind|price/.test(n)) return 'whether the return policy or pricing needs a look';
+      return 'which products drive these returns';
+    };
+    if (sp && sp.issues30 && sp.issues30.length) {
+      var i1 = sp.issues30[0];
+      var t1 = '"' + i1.issue + '" is the top support complaint: ' + pct(i1.sharePct, 0) + ' of tickets in the last 30 days.';
+      if (/deliver|late/i.test(i1.issue) && dl && dl.latePct30 !== null) t1 += ' It matches the delivery data: ' + pct(dl.latePct30) + ' of parcels arrived late.';
+      tips.push(t1 + ' Decision it informs: ' + issueFix(i1.issue) + '.');
+      if (sp.issues30[1]) tips.push('"' + sp.issues30[1].issue + '" is next, at ' + pct(sp.issues30[1].sharePct, 0) + ' of tickets. Decision it informs: ' + issueFix(sp.issues30[1].issue) + '.');
+    }
+    if (rt && rt.reasons && rt.reasons.length) { var r1 = rt.reasons[0]; tips.push('"' + r1.reason + '" is the top reason for returns: ' + pct(r1.sharePct, 0) + ' of returns in the last 90 days. Decision it informs: ' + reasonFix(r1.reason) + '.'); }
+    if (rv && sp && rv.avgRating90 !== null && sp.csat30 !== null && sp.csat30 < rv.avgRating90) tips.push('Support is rated lower than the products themselves (' + sp.csat30.toFixed(2) + ' vs ' + rv.avgRating90.toFixed(2) + '), so the service, more than the products, is the weaker half of the experience.');
+    if (plan.metric === 'returns' && rt && rt.reasons && rt.reasons.length) tips.unshift(tips.splice(tips.length - (rv && sp && sp.csat30 < rv.avgRating90 ? 2 : 1), 1)[0]);
+    if (!tips.length) return out(text.replace(' The numbers point to these places to improve:', ''), { asOf: asOf(B) });
+    return out(text, { bullets: tips, note: 'These are where the numbers point. What to change is a person\'s call.',
+      working: ['Product rating and negative share: Reviews tab, last 90 days.', 'Support rating and complaint types: Customer_Service tab, last 30 days. Tickets are read on their own, because their order links don\'t match the orders.', 'Return reasons and refunds: Returns tab, last 90 days.', 'Late parcels: Shipments_Logistics tab, last 30 days.'],
+      chips: ['Returns by reason', 'Support tickets by issue', 'Which carrier is late most?'], asOf: asOf(B) });
+  }
+
+  function help(B, plan) {
+    var yes = plan && /can|anything|know/i.test(String(plan.raw || ''));
+    return out((yes ? 'Yes, anything that lives in the company\'s numbers. ' : '') + 'Ask me about sales, orders, customers, marketing, delivery, returns, stock, support, profit or people. I understand days, weeks, months, "this month", "last 12 months", countries, product categories and sales channels. I can also show the SQL behind a number, the data model, whether revenue matches the Finance tab, and what decision each alert is for.', { chips: defaultChips(B), asOf: asOf(B) });
   }
 
   function askBack(B, plan) {
@@ -1521,29 +1581,64 @@ var Analyst = (function () {
 
   // ---------- ASK THE ANALYST ----------
   function renderAsk() {
-    var s = section('ask', 'Ask the analyst', 'Plain-English questions, answered from the numbers above. Every answer shows how it was worked out.');
-    var input = el('input', { type: 'text', id: 'q', placeholder: 'e.g. Revenue in India last month', autocomplete: 'off', 'aria-label': 'Ask a business question' });
+    var s = section('ask', 'Ask the analyst', 'Ask in your own words. An AI reads the question; every number still comes from this morning\'s checked data, with the working shown.');
+    var input = el('input', { type: 'text', id: 'q', placeholder: 'e.g. how bad was FedEx this week?', autocomplete: 'off', 'aria-label': 'Ask a business question', maxlength: '300' });
     var form = el('form', { cls: 'ask-form' }, [input, el('button', { type: 'submit', text: 'Ask' })]);
     var chips = el('div', { cls: 'chips' });
     var thread = el('div', { cls: 'thread', 'aria-live': 'polite' });
-    function ask(q, replay) {
-      q = String(q || '').trim(); if (!q) return;
-      if (!replay) asked.push(q);
-      var a = Analyst.ask(q, B);
+    function build(q, a) {
       var qa = el('div', { cls: 'qa' }, [el('p', { cls: 'q', text: q }), el('p', { cls: 'a', text: a.text })]);
       if (a.code) qa.appendChild(el('pre', { cls: 'sql' }, [el('code', { text: a.code })]));
       if (a.bullets && a.bullets.length) qa.appendChild(el('ul', null, a.bullets.map(function (b) { return el('li', { text: b }); })));
       if (a.note) qa.appendChild(el('p', { cls: 'a-note', text: a.note }));
       if (a.working && a.working.length) qa.appendChild(el('details', null, [el('summary', { text: 'How I worked it out' }), el('ol', null, a.working.map(function (w) { return el('li', { text: w }); }))]));
-      if (a.chips && a.chips.length) { var c2 = el('div', { cls: 'chips' }); a.chips.forEach(function (c) { c2.appendChild(el('button', { cls: 'chip', type: 'button', text: c, onclick: function () { ask(c); } })); }); qa.appendChild(c2); }
-      if (a.asOf) qa.appendChild(el('div', { cls: 'asof-line', text: a.asOf }));
-      thread.insertBefore(qa, thread.firstChild);
+      if (a.chips && a.chips.length) { var c2 = el('div', { cls: 'chips' }); a.chips.forEach(function (c) { c2.appendChild(el('button', { cls: 'chip', type: 'button', text: c, onclick: function () { ask(c, false, true); } })); }); qa.appendChild(c2); }
+      var foot = [a.asOf, a.via].filter(Boolean).join(' ');
+      if (foot) qa.appendChild(el('div', { cls: 'asof-line', text: foot }));
+      return qa;
+    }
+    function ask(q, replay, fromChip) {
+      q = String(q || '').trim().slice(0, 300); if (!q) return;
+      if (!replay) asked.push(q);
       input.value = '';
+      if (replay || fromChip || aiCache[q] !== undefined) { thread.insertBefore(build(q, choose(q, aiCache[q] || null)), thread.firstChild); return; }
+      var wait = el('div', { cls: 'qa pending' }, [el('p', { cls: 'q', text: q }), el('p', { cls: 'a-note', text: 'Reading your question…' })]);
+      thread.insertBefore(wait, thread.firstChild);
+      aiRead(q).then(function (ai) { aiCache[q] = ai; if (wait.parentNode) thread.replaceChild(build(q, choose(q, ai)), wait); });
     }
     form.addEventListener('submit', function (e) { e.preventDefault(); ask(input.value); });
-    Analyst.defaultChips(B).forEach(function (c) { chips.appendChild(el('button', { cls: 'chip', type: 'button', text: c, onclick: function () { ask(c); } })); });
+    Analyst.defaultChips(B).forEach(function (c) { chips.appendChild(el('button', { cls: 'chip', type: 'button', text: c, onclick: function () { ask(c, false, true); } })); });
     s.appendChild(el('div', { cls: 'ask' }, [form, chips, thread]));
     asked.forEach(function (q) { ask(q, true); });
+  }
+
+  // ---------- AI question reader (Gemini, via the morning robot) ----------
+  // The AI only rewrites the question into words the analyst understands.
+  // The analyst then does the maths on the checked numbers, so nothing is made up.
+  var aiCache = {};
+  function aiRead(q) {
+    if (navigator.onLine === false || params.get('source') === 'snapshot') return Promise.resolve(null);
+    var u = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'q=' + encodeURIComponent(q);
+    return fetchJson(u, 9000).catch(function () { return jsonp(u, 9000); })
+      .then(function (r) { return r && r.ok === true && typeof r.rewrite === 'string' ? r : null; })
+      .catch(function () { return null; });
+  }
+  function weak(a) { return !a || a.clarify || a.error || (a.plan && a.plan.op === 'help'); }
+  function choose(q, ai) {
+    var rules = Analyst.ask(q, B);
+    if (!ai) return rules;
+    if (rules.plan && ['help', 'experience'].indexOf(rules.plan.op) >= 0) return rules;
+    if (ai.inScope === false) {
+      if (!weak(rules)) return rules;
+      return { text: 'That\'s outside what I can answer. I only work from the company\'s own checked numbers: sales, orders, customers, marketing, delivery, returns, stock, support, profit and people.', chips: Analyst.defaultChips(B).slice(0, 4), asOf: 'Data as of ' + F.dayName(B.dataDay) + '.', via: 'Read by AI.' };
+    }
+    var rw = ai.rewrite.trim();
+    if (!rw || rw.toLowerCase() === q.toLowerCase()) { rules.via = 'Read by AI.'; return rules; }
+    var a = Analyst.ask(rw, B);
+    if (weak(a) && !weak(rules)) return rules;
+    a.working = ['The AI read your question as: "' + rw + '". The numbers come from this morning\'s checked data, not from the AI.'].concat(a.working || []);
+    a.via = 'Read by AI.';
+    return a;
   }
 
   // ---------- PROOF: data model, SQL, reconciliation, tests, decisions ----------
