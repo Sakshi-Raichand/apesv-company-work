@@ -267,6 +267,14 @@ th { font-weight: 600; color: var(--ink-2); font-size: 12px; }
 .notes { margin: 0; padding-left: 18px; }
 footer { padding: 28px 0 40px; font-size: 11.5px; color: var(--muted); }
 
+.age-note { font-size: 13px; color: var(--muted); margin: 10px 0 0; max-width: 70ch; }
+.held { background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-left: 5px solid var(--warning); border-radius: 12px; padding: 16px 18px; margin: 20px 0 0; }
+.held-h { font-size: 15px; color: var(--ink); display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.held-h .ico { width: 20px; height: 20px; border-radius: 50%; background: var(--warning); color: #3a2a00; display: inline-grid; place-items: center; font-weight: 700; font-size: 12px; }
+.held ul { margin: 10px 0 8px; padding-left: 20px; font-size: 14px; color: var(--ink-2); }
+.held li { margin-bottom: 4px; }
+.held p { margin: 0; font-size: 13px; color: var(--muted); max-width: 70ch; }
+
 /* ---------- Proof ---------- */
 .decide { display: block; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
 .decide b { font-weight: 600; color: var(--accent); }
@@ -492,6 +500,7 @@ var Analyst = (function () {
     // special questions
     if (/ why | reason | cause | explain | what drove | what caused /.test(q) && (!plan.metric || ['revenue','orders','aov'].indexOf(plan.metric) >= 0)) plan.op = 'why';
     if (/ trust | health | data quality | checks | is the data | up to date | stale | fresh | how old /.test(q) && !plan.metric) plan.op = 'health';
+    if (/held back|held-back|quarantin|why (is|are) (the )?(data|date|numbers)|missing day|yesterday'?s? data|not updated|out of date|why.*(old|behind)/.test(q)) plan.op = 'health';
     if (/latest update|any update|summary|summarise|summarize|how are we doing|how did we do|what happened|what changed|overview|headlines|anything i should know|morning brief|give me the brief|what's new|whats new|status report|update me/.test(q) && !plan.metric) plan.op = 'summary';
     if (/^\s*(hi|hello|hey|help|what can (you|i) (do|ask))([^a-z]|$)/.test(q) || / help /.test(q) && !plan.metric) plan.op = plan.op === 'value' ? 'help' : plan.op;
     if (!plan.metric && / (what can (you|u|i) (do|ask|answer|tell)|can (you|u) (answer|help|tell)|what do (you|u) know|anything|what (questions|things) can) /.test(q)) plan.op = 'help';
@@ -939,6 +948,17 @@ var Analyst = (function () {
     var P = Analyst._payload || {};
     var checks = (P.health && P.health.checks) || [];
     var failed = checks.filter(function (c) { return !c.pass; });
+    var hb = (B && B.heldBack) || [];
+    var newest0 = (B && (B.newestDay || B.dataDay)) || '';
+    var gap0 = (B && typeof B.dataAgeDays === 'number') ? B.dataAgeDays : 0;
+    try { gap0 = Math.max(gap0, Math.round((Date.now() - Date.parse(newest0)) / 864e5)); } catch (e) {}
+    if (gap0 >= 2 && !hb.length) return out('The sheet has had no new rows since ' + dayName(newest0) + ', ' + gap0 + ' days ago, so this page shows ' + dayName(B.dataDay) + '. That is the newest data there is, not a drop in trading. Every check on the data itself passed.', {
+      bullets: (B.trustNotes || []), note: 'The page refreshes itself every morning. It will move forward by itself as soon as the team adds rows.',
+      working: checks.map(function (c) { return (c.pass ? 'Passed: ' : 'Warning: ') + c.name + ' — ' + c.detail; }), asOf: asOf(B) });
+    if (hb.length) return out((hb.length === 1 ? dayName(hb[0].day) + ' is held back' : hb.length + ' days are held back') + ', so this page shows ' + dayName(B.dataDay) + '. Those days are left out of every number here, which is why the date is not today\'s.', {
+      bullets: hb.map(function (x) { return dayName(x.day) + ': ' + x.why + (x.examples && x.examples.length ? ' (for example ' + x.examples.slice(0, 3).join(', ') + ')' : '') + '.'; }).concat(B.trustNotes || []),
+      note: 'They come back by themselves once the sheet is fixed. Nothing is deleted.',
+      working: checks.map(function (c) { return (c.pass ? 'Passed: ' : 'Warning: ') + c.name + ' — ' + c.detail; }), asOf: asOf(B) });
     return out(failed.length ? 'Mostly yes, with ' + failed.length + ' warning' + (failed.length > 1 ? 's' : '') + ': ' + failed.map(function (c) { return c.detail; }).join(' ') : 'Yes. All ' + checks.length + ' checks passed this morning.', {
       bullets: (B.trustNotes || []), working: checks.map(function (c) { return (c.pass ? 'Passed: ' : 'Warning: ') + c.name + ' — ' + c.detail; }), asOf: asOf(B) });
   }
@@ -1296,7 +1316,7 @@ var Analyst = (function () {
     if (state) STATE = state;
     renderHeader();
     if (!B) { app.appendChild(el('div', { cls: 'banner warn', text: 'The morning robot has no good numbers saved yet. Open the Google Sheet, then Extensions > Apps Script, and run buildBrief.' })); return; }
-    renderToday(); renderGrowth(); renderNote(); renderMix(); renderCustomers(); renderOps(); renderFinance(); renderPeople(); renderAsk(); renderProof(); renderMethod();
+    renderHeldBack(); renderToday(); renderGrowth(); renderNote(); renderMix(); renderCustomers(); renderOps(); renderFinance(); renderPeople(); renderAsk(); renderProof(); renderMethod();
     app.appendChild(el('footer', null, [el('div', { text: 'Apesv Global is a fictional company; the dataset is synthetic. Dashboard and data pipeline built by Sakshi Raichand.' })]));
     spyNav();
   }
@@ -1343,11 +1363,41 @@ var Analyst = (function () {
     app.appendChild(s); return s;
   }
 
+  // ---------- held-back days ----------
+  function renderHeldBack() {
+    if (!B) return;
+    var h = B.heldBack || [];
+    var newest = B.newestDay || B.dataDay;
+    var todayKey = new Date(Date.now() + new Date().getTimezoneOffset() * 60000 + 5.5 * 3600e3).toISOString().slice(0, 10);
+    var gap = 0;
+    try { gap = Math.round((Date.parse(todayKey) - Date.parse(newest)) / 864e5); } catch (e) { gap = 0; }
+    if (typeof B.dataAgeDays === 'number' && B.dataAgeDays > gap) gap = B.dataAgeDays;   // the robot's own count wins
+    var stale = gap >= 2;
+    if (!h.length && !stale) return;
+    var lines = [], title;
+    if (stale) {
+      title = 'No new data since ' + F.dayName(newest);
+      lines.push(el('li', null, [el('b', { text: 'Waiting for the team: ' }), 'nothing new has been added to the sheet for ' + gap + ' days. The team adds data in batches, so this is normal. These are the latest numbers there are, not a drop in trading.']));
+    }
+    h.forEach(function (x) {
+      lines.push(el('li', null, [el('b', { text: F.dayName(x.day) + ': ' }), 'held back because ' + x.why + (x.examples && x.examples.length ? ' (for example ' + x.examples.slice(0, 3).join(', ') + ')' : '') + '.']));
+    });
+    if (!title) title = h.length === 1 ? F.dayName(h[0].day) + ' is held back' : h.length + ' days are held back';
+    var box = el('div', { cls: 'held' }, [
+      el('div', { cls: 'held-h' }, [el('span', { cls: 'ico', 'aria-hidden': 'true', text: '!' }), el('b', { text: title }), ' — everything below is as of ' + F.dayName(B.dataDay) + '.']),
+      el('ul', null, lines),
+      el('p', { text: 'A held-back day is left out of every number here, so a half-finished upload can\'t look like a bad day of trading. Days come back by themselves once the sheet is fixed, and the page updates every morning without anyone doing anything.' })
+    ]);
+    app.appendChild(box);
+  }
+
   // ---------- TODAY ----------
   // ---------- TODAY: the numbers first ----------
   function renderToday() {
     var k = B.kpis, D = B.dataDay, wd = new Date(D + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
-    var s = section('today', 'Yesterday at a glance', F.dayName(D) + ', compared with a normal day and the same day last week');
+    var old = (B.dataAgeDays || 0) > 1;
+    var s = section('today', old ? 'The latest day at a glance' : 'Yesterday at a glance',
+      F.dayName(D) + (old ? ', the most recent day in the sheet' : '') + ', compared with a normal day and the same day last week');
     var ser = B.series.slice(-28);
     var tiles = el('div', { cls: 'tiles t6' });
     var defs = [
@@ -1375,6 +1425,7 @@ var Analyst = (function () {
     var k = B.kpis, D = B.dataDay, wd = new Date(D + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
     var s = section('note', 'Morning note', 'What the numbers above mean, in plain words');
     var tone = k.revenue.vsNormalPct >= 0.15 ? 'a strong day' : k.revenue.vsNormalPct <= -0.15 ? 'a soft day' : 'a steady day';
+    var ageLine = (B.dataAgeDays || 0) > 1 ? el('p', { cls: 'age-note', text: 'This is the most recent day the team has added. The sheet was last added to ' + B.dataAgeDays + ' days ago, and the page moves forward by itself when new rows arrive.' }) : null;
     var note = el('p', { cls: 'note' }, [
       wd + ' was ' + tone + '. Apesv sold ', el('b', { text: money(k.revenue.value) }), ' across ', el('b', { text: int(k.orders.value) + ' orders' }),
       ', ' + F.changeWords(k.revenue.value, k.revenue.normal) + ' a normal day and ' + F.changeWords(k.revenue.value, k.revenue.lastWeek) + ' last ' + wd + '. ',
@@ -1385,7 +1436,7 @@ var Analyst = (function () {
       watch.appendChild(el('li', { cls: w.level }, [el('span', { cls: 'ico', 'aria-hidden': 'true', text: w.level === 'good' ? '✓' : '!' }), el('div', null, [el('span', { cls: 'area', text: w.area + (w.level === 'bad' ? ', needs a look' : w.level === 'warn' ? ', worth watching' : '') }), w.text, w.text.indexOf('Nothing unusual') === 0 ? null : el('span', { cls: 'decide' }, [el('b', { text: 'Decision it informs: ' }), Proof.decisionFor(w)])])]));
     });
     var g = el('div', { cls: 'grid g-wide', style: 'align-items:start' });
-    g.appendChild(el('div', { cls: 'card' }, [el('h3', { text: 'Summary' }), el('div', { style: 'height:10px' }), note]));
+    g.appendChild(el('div', { cls: 'card' }, [el('h3', { text: 'Summary' }), el('div', { style: 'height:10px' }), note, ageLine]));
     g.appendChild(card('What changed', null, watch, null, 'Alerts compare yesterday with a normal day (the 28 days before). The page flags; a person decides.'));
     s.appendChild(g);
   }
@@ -1686,7 +1737,10 @@ var Analyst = (function () {
     t.appendChild(tile('Data checks passed this morning', passed + ' of ' + checks.length, '', [[passed === checks.length ? 'Every check passed' : (checks.length - passed) + ' warning' + (checks.length - passed > 1 ? 's' : '') + ': ' + checks.filter(function (c) { return !c.pass; }).map(function (c) { return c.name; }).join(', ')]]));
     t.appendChild(tile('Revenue reconciled to the Finance tab', R ? R.ok + ' of ' + R.n : '—', R ? ' months' : '', [[R ? (R.ok === R.n ? 'Matched to the cent, checked every morning' : (R.n - R.ok) + ' month(s) differ') : 'Finance tab not available']]));
     t.appendChild(tile('Numbers cross-checked', C.matched + ' of ' + C.checked, '', [['Recalculated separately in Python, ' + C.when]]));
-    t.appendChild(tile('Failure drills passed', Proof.DRILLS.length + ' of ' + Proof.DRILLS.length, '', [['Broken data tested on purpose']]));
+    var hb = (B.heldBack || []).length;
+    t.appendChild(hb
+      ? tile('Days held back', String(hb), hb === 1 ? ' day' : ' days', [[(B.heldBack || []).map(function (x) { return x.day; }).join(', ') + ' left out until the sheet is fixed']])
+      : tile('Failure drills passed', Proof.DRILLS.length + ' of ' + Proof.DRILLS.length, '', [['Broken data tested on purpose']]));
     s.appendChild(t);
     s.appendChild(el('div', { style: 'height:16px' }));
 
