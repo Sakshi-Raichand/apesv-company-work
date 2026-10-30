@@ -268,15 +268,6 @@ th { font-weight: 600; color: var(--ink-2); font-size: 12px; }
 footer { padding: 28px 0 40px; font-size: 11.5px; color: var(--muted); }
 
 .age-note { font-size: 13px; color: var(--muted); margin: 10px 0 0; max-width: 70ch; }
-.held { background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-left: 5px solid var(--warning); border-radius: 12px; padding: 16px 18px; margin: 20px 0 0; }
-.held.info { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-left-color: var(--accent); }
-.held.info .ico { background: var(--accent); color: var(--surface); font-style: italic; }
-.held-h { font-size: 15px; color: var(--ink); display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
-.held-h .ico { width: 20px; height: 20px; border-radius: 50%; background: var(--warning); color: #3a2a00; display: inline-grid; place-items: center; font-weight: 700; font-size: 12px; }
-.held ul { margin: 10px 0 8px; padding-left: 20px; font-size: 14px; color: var(--ink-2); }
-.held li { margin-bottom: 4px; }
-.held p { margin: 0; font-size: 13px; color: var(--muted); max-width: 70ch; }
-
 /* ---------- Proof ---------- */
 .decide { display: block; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
 .decide b { font-weight: 600; color: var(--accent); }
@@ -1321,7 +1312,7 @@ var Analyst = (function () {
     if (state) STATE = state;
     renderHeader();
     if (!B) { app.appendChild(el('div', { cls: 'banner warn', text: 'The morning robot has no good numbers saved yet. Open the Google Sheet, then Extensions > Apps Script, and run buildBrief.' })); return; }
-    renderHeldBack(); renderToday(); renderGrowth(); renderNote(); renderMix(); renderCustomers(); renderOps(); renderFinance(); renderPeople(); renderAsk(); renderProof(); renderMethod();
+    renderToday(); renderGrowth(); renderNote(); renderMix(); renderCustomers(); renderOps(); renderFinance(); renderPeople(); renderAsk(); renderProof(); renderMethod();
     app.appendChild(el('footer', null, [el('div', { text: 'Apesv Global is a fictional company; the dataset is synthetic. Dashboard and data pipeline built by Sakshi Raichand.' })]));
     spyNav();
   }
@@ -1369,34 +1360,6 @@ var Analyst = (function () {
   }
 
   // ---------- held-back days ----------
-  function renderHeldBack() {
-    if (!B) return;
-    var h = B.heldBack || [];
-    var newest = B.newestDay || B.dataDay;
-    var todayKey = new Date(Date.now() + new Date().getTimezoneOffset() * 60000 + 5.5 * 3600e3).toISOString().slice(0, 10);
-    var gap = 0;
-    try { gap = Math.round((Date.parse(todayKey) - Date.parse(newest)) / 864e5); } catch (e) { gap = 0; }
-    if (typeof B.dataAgeDays === 'number' && B.dataAgeDays > gap) gap = B.dataAgeDays;   // the robot's own count wins
-    var stale = gap >= 2;
-    if (!h.length && !stale) return;
-    var lines = [], title;
-    if (stale) {
-      title = 'No new data since ' + F.dayName(newest);
-      lines.push(el('li', null, [el('b', { text: 'Waiting for the team: ' }), 'nothing new has been added to the sheet for ' + gap + ' days. The team adds data in batches, so this is normal. These are the latest numbers there are, not a drop in trading.']));
-    }
-    h.forEach(function (x) {
-      lines.push(el('li', null, [el('b', { text: F.dayName(x.day) + ': ' }), 'held back because ' + x.why + (x.examples && x.examples.length ? ' (for example ' + x.examples.slice(0, 3).join(', ') + ')' : '') + '.']));
-    });
-    if (!title) title = h.length === 1 ? F.dayName(h[0].day) + ' is held back' : h.length + ' days are held back';
-    var green = P && P.health && P.health.status === 'green';
-    var box = el('div', { cls: 'held' + (green ? ' info' : '') }, [
-      el('div', { cls: 'held-h' }, [el('span', { cls: 'ico', 'aria-hidden': 'true', text: green ? 'i' : '!' }), el('b', { text: title }), ' — everything below is as of ' + F.dayName(B.dataDay) + '.']),
-      el('ul', null, lines),
-      el('p', { text: 'A held-back day is left out of every number here, so a half-finished upload can\'t look like a bad day of trading. Days come back by themselves once the sheet is fixed, and the page updates every morning without anyone doing anything.' })
-    ]);
-    app.appendChild(box);
-  }
-
   // ---------- TODAY ----------
   // ---------- TODAY: the numbers first ----------
   function renderToday() {
