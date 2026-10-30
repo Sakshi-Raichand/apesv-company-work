@@ -269,6 +269,8 @@ footer { padding: 28px 0 40px; font-size: 11.5px; color: var(--muted); }
 
 .age-note { font-size: 13px; color: var(--muted); margin: 10px 0 0; max-width: 70ch; }
 .held { background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-left: 5px solid var(--warning); border-radius: 12px; padding: 16px 18px; margin: 20px 0 0; }
+.held.info { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-left-color: var(--accent); }
+.held.info .ico { background: var(--accent); color: var(--surface); font-style: italic; }
 .held-h { font-size: 15px; color: var(--ink); display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .held-h .ico { width: 20px; height: 20px; border-radius: 50%; background: var(--warning); color: #3a2a00; display: inline-grid; place-items: center; font-weight: 700; font-size: 12px; }
 .held ul { margin: 10px 0 8px; padding-left: 20px; font-size: 14px; color: var(--ink-2); }
@@ -285,6 +287,8 @@ pre.sql { margin: 8px 0; padding: 12px 14px; background: var(--page); border: 1p
 .sql-list summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .sql-list .verified { margin: 0; font-size: 13px; color: var(--ink-2); }
 .sql-list .verified b { color: var(--text-good); }
+.notes li.hard { color: var(--text-bad); }
+.notes li.soft { color: var(--ink-2); }
 .drills { list-style: none; margin: 0; padding: 0; }
 .drills li { display: grid; gap: 2px; padding: 9px 0; border-top: 1px solid var(--grid); font-size: 13.5px; color: var(--ink-2); }
 .drills li:first-child { border-top: 0; padding-top: 0; }
@@ -959,7 +963,8 @@ var Analyst = (function () {
       bullets: hb.map(function (x) { return dayName(x.day) + ': ' + x.why + (x.examples && x.examples.length ? ' (for example ' + x.examples.slice(0, 3).join(', ') + ')' : '') + '.'; }).concat(B.trustNotes || []),
       note: 'They come back by themselves once the sheet is fixed. Nothing is deleted.',
       working: checks.map(function (c) { return (c.pass ? 'Passed: ' : 'Warning: ') + c.name + ' — ' + c.detail; }), asOf: asOf(B) });
-    return out(failed.length ? 'Mostly yes, with ' + failed.length + ' warning' + (failed.length > 1 ? 's' : '') + ': ' + failed.map(function (c) { return c.detail; }).join(' ') : 'Yes. All ' + checks.length + ' checks passed this morning.', {
+    var hard = failed.filter(function (c) { return !c.soft; });
+    return out(hard.length ? 'Mostly yes, with ' + hard.length + ' thing' + (hard.length > 1 ? 's' : '') + ' to fix: ' + hard.map(function (c) { return c.detail; }).join(' ') : 'Yes. The robot ran this morning, every check it can act on passed, and these numbers are the ones it trusts.', {
       bullets: (B.trustNotes || []), working: checks.map(function (c) { return (c.pass ? 'Passed: ' : 'Warning: ') + c.name + ' — ' + c.detail; }), asOf: asOf(B) });
   }
 
@@ -1337,7 +1342,7 @@ var Analyst = (function () {
     var h = P.health || { status: 'amber', checks: [] }, failed = h.checks.filter(function (c) { return !c.pass; });
     var chip = document.getElementById('statusChip'), txt = document.getElementById('statusText');
     var when = ranWhen(P.generatedAt);
-    var msg = { checking: 'Updated ' + when, live: 'Updated ' + when, offline: 'Offline, updated ' + when, failed: 'Updated ' + when, oldRobot: 'Updated ' + when }[STATE] || 'Updated ' + when;
+    var msg = { checking: 'Updated ' + when, live: 'Live · updated ' + when, offline: 'Offline, updated ' + when, failed: 'Updated ' + when, oldRobot: 'Updated ' + when }[STATE] || 'Updated ' + when;
     chip.className = 'pill ' + (STATE === 'checking' ? 'checking ' : '') + (h.status === 'green' && STATE === 'live' ? 'green' : 'amber');
     txt.textContent = msg;
     var why = h.status === 'green' ? 'All data checks passed.' : failed.map(function (c) { return c.detail; }).join(' ');
@@ -1383,8 +1388,9 @@ var Analyst = (function () {
       lines.push(el('li', null, [el('b', { text: F.dayName(x.day) + ': ' }), 'held back because ' + x.why + (x.examples && x.examples.length ? ' (for example ' + x.examples.slice(0, 3).join(', ') + ')' : '') + '.']));
     });
     if (!title) title = h.length === 1 ? F.dayName(h[0].day) + ' is held back' : h.length + ' days are held back';
-    var box = el('div', { cls: 'held' }, [
-      el('div', { cls: 'held-h' }, [el('span', { cls: 'ico', 'aria-hidden': 'true', text: '!' }), el('b', { text: title }), ' — everything below is as of ' + F.dayName(B.dataDay) + '.']),
+    var green = P && P.health && P.health.status === 'green';
+    var box = el('div', { cls: 'held' + (green ? ' info' : '') }, [
+      el('div', { cls: 'held-h' }, [el('span', { cls: 'ico', 'aria-hidden': 'true', text: green ? 'i' : '!' }), el('b', { text: title }), ' — everything below is as of ' + F.dayName(B.dataDay) + '.']),
       el('ul', null, lines),
       el('p', { text: 'A held-back day is left out of every number here, so a half-finished upload can\'t look like a bad day of trading. Days come back by themselves once the sheet is fixed, and the page updates every morning without anyone doing anything.' })
     ]);
@@ -1731,10 +1737,11 @@ var Analyst = (function () {
 
   function renderProof() {
     var s = section('proof', 'Proof', 'How the numbers are modelled, checked and used, so a mistake in the sheet never reaches the CEO as a fact.');
-    var checks = (P.health && P.health.checks) || [], passed = checks.filter(function (c) { return c.pass; }).length;
+    var allChecks = (P.health && P.health.checks) || [];
+    var checks = allChecks.filter(function (c) { return !c.soft; }), passed = checks.filter(function (c) { return c.pass; }).length;
     var R = Proof.reconcile(B), C = Proof.CROSS;
     var t = el('div', { cls: 'tiles t4' });
-    t.appendChild(tile('Data checks passed this morning', passed + ' of ' + checks.length, '', [[passed === checks.length ? 'Every check passed' : (checks.length - passed) + ' warning' + (checks.length - passed > 1 ? 's' : '') + ': ' + checks.filter(function (c) { return !c.pass; }).map(function (c) { return c.name; }).join(', ')]]));
+    t.appendChild(tile('Checks passed this morning', passed + ' of ' + checks.length, '', [[passed === checks.length ? 'Every check a person would have to act on' : checks.filter(function (c) { return !c.pass; }).map(function (c) { return c.name; }).join(', ') + ' needs attention']]));
     t.appendChild(tile('Revenue reconciled to the Finance tab', R ? R.ok + ' of ' + R.n : '—', R ? ' months' : '', [[R ? (R.ok === R.n ? 'Matched to the cent, checked every morning' : (R.n - R.ok) + ' month(s) differ') : 'Finance tab not available']]));
     t.appendChild(tile('Numbers cross-checked', C.matched + ' of ' + C.checked, '', [['Recalculated separately in Python, ' + C.when]]));
     var hb = (B.heldBack || []).length;
@@ -1792,7 +1799,8 @@ var Analyst = (function () {
     box.appendChild(el('p', { id: 'liveNote', text: liveNote(), style: 'font-weight:600;color:var(--ink)' }));
     box.appendChild(el('p', { text: 'The company team adds new rows to a Google Sheet every day. Each morning between 7:00 and 8:00 India time, a script inside that sheet checks the data, works out every number on this page, and saves the result. This page reads only that summary: no customer names, emails or salaries ever leave the sheet. Nothing here is typed by hand.' }));
     box.appendChild(el('h3', { text: 'The checks that run every morning' }));
-    box.appendChild(el('ul', { cls: 'notes' }, (P.health.checks || []).map(function (c) { return el('li', { text: (c.pass ? '✓ ' : '! ') + c.name + ': ' + c.detail }); })));
+    box.appendChild(el('ul', { cls: 'notes' }, (P.health.checks || []).map(function (c) { return el('li', { cls: c.pass ? '' : (c.soft ? 'soft' : 'hard'), text: (c.pass ? '✓ ' : c.soft ? 'i ' : '! ') + c.name + ': ' + c.detail }); })));
+    box.appendChild(el('p', { text: 'The light at the top is about this system, not about the sheet. Green means the robot ran, checked the data and published numbers it trusts. Lines marked "i" are facts about the data, such as how recent it is; they do not turn the light amber. Only a problem a person must fix does.' }));
     box.appendChild(el('p', { text: 'If any check about the orders fails (a renamed column, a pasted duplicate, money that doesn\'t add up), the page keeps showing the last good numbers and the light turns amber, so a mistake in the sheet never reaches the CEO as a fact.' }));
     if (B.trustNotes && B.trustNotes.length) { box.appendChild(el('h3', { text: 'Before you trust a number' })); box.appendChild(el('ul', { cls: 'notes' }, B.trustNotes.map(function (n) { return el('li', { text: n }); }))); }
     box.appendChild(el('h3', { text: 'Definitions' }));
